@@ -1,64 +1,103 @@
 import streamlit as st
 import pandas as pd
-import pickle
 import joblib
+from datetime import datetime
+from os import path
 
-# ------------------------------
-# Load trained model
-# ------------------------------
-model = joblib.load(r"C:\Users\user\Desktop\Flight\model\flight_price_model.pkl")
+# Page Config
+st.set_page_config(
+    page_title="Flight Price Prediction & Recommendation",
+    page_icon="✈️",
+    layout="wide",
+)
 
-st.title("✈️ Flight Price Prediction App")
-st.write("Enter flight details to get the predicted ticket price.")
+# Load Model & Dataset
 
-# ------------------------------
-# User Inputs
-# ------------------------------
-airline = st.selectbox("Airline", [
-    "Air India","Indigo","SpiceJet","Vistara","GoAir","AirAsia"
-])
+model_path = path.join("Model", "flight_price_model.pkl")
+flight_model = joblib.load(model_path)
 
-source_city = st.selectbox("Source City", [
-    "Delhi","Mumbai","Bangalore","Chennai","Kolkata","Hyderabad"
-])
+data_path = path.join("Data", "Clean_Dataset.csv")
+dataset = pd.read_csv(data_path)
 
-destination_city = st.selectbox("Destination City", [
-    "Delhi","Mumbai","Bangalore","Chennai","Kolkata","Hyderabad"
-])
+# Sidebar - User Input
 
-departure_time = st.selectbox("Departure Time", [
-    "Morning","Evening","Night","Afternoon","Early Morning","Late Night"
-])
+st.sidebar.title(" Flight Details")
 
-arrival_time = st.selectbox("Arrival Time", [
-    "Morning","Evening","Night","Afternoon","Early Morning","Late Night"
-])
+airline = st.sidebar.selectbox("✈️ Airline", dataset["airline"].unique())
+source_city = st.sidebar.selectbox("🛫 Source City", dataset["source_city"].unique())
+destination_city = st.sidebar.selectbox("🛬 Destination City", dataset["destination_city"].unique())
+departure_time = st.sidebar.selectbox("🕒 Departure Time", dataset["departure_time"].unique())
+arrival_time = st.sidebar.selectbox("🕓 Arrival Time", dataset["arrival_time"].unique())
+stops = st.sidebar.selectbox("⏸ Stops", sorted(dataset["stops"].unique()))
+travel_class = st.sidebar.radio("💺 Class", dataset["class"].unique())
+duration = st.sidebar.number_input("⏱ Duration (hours)", min_value=1.0, max_value=50.0, value=2.0)
+days_left = st.sidebar.slider("📅 Days Left to Travel", min_value=1, max_value=60, value=10)
 
-stops = st.selectbox("Stops", ["zero","one","two_or_more"])
+# Prepare Input Data
 
-flight_class = st.selectbox("Class", ["Economy", "Business"])
+input_dict = {
+    "airline": airline,
+    "source_city": source_city,
+    "destination_city": destination_city,
+    "departure_time": departure_time,
+    "arrival_time": arrival_time,
+    "stops": stops,
+    "class": travel_class,
+    "duration": duration,
+    "days_left": days_left,
+}
 
-duration = st.number_input("Duration (hours)", min_value=0.5, step=0.5)
-days_left = st.number_input("Days Left for Departure", min_value=0, step=1)
+input_df = pd.DataFrame([input_dict])
 
-# ------------------------------
-# Predict Button
-# ------------------------------
-if st.button("Predict Price"):
-    # Create a DataFrame with user input
-    new_data = pd.DataFrame({
-        "airline": [airline],
-        "flight": ["NA"],   # if model had 'flight' column, placeholder
-        "source_city": [source_city],
-        "departure_time": [departure_time],
-        "stops": [stops],
-        "arrival_time": [arrival_time],
-        "destination_city": [destination_city],
-        "class": [flight_class],
-        "duration": [duration],
-        "days_left": [days_left]
-    })
+# Main Layout
 
-    # Predict price
-    predicted_price = model.predict(new_data)
-    st.success(f"💰 Predicted Ticket Price: ₹ {predicted_price[0]:,.2f}")
+st.title("✈️ Flight Price Prediction & Recommendation")
+st.markdown(
+    """
+    This app helps you **predict flight ticket prices** and get **best recommendations** 
+    based on your journey details.  
+    """
+)
+
+tab1, tab2 = st.tabs(["💰 Price Prediction", "⭐ Recommendations"])
+
+# Tab 1: Prediction
+
+with tab1:
+    st.subheader("Your Flight Details")
+    st.dataframe(input_df)
+
+    if st.button("Predict Price"):
+        prediction = flight_model.predict(input_df)[0]
+        st.success(f"Estimated Ticket Price: ₹ {round(prediction, 2)}")
+
+# Tab 2: Recommendations
+
+with tab2:
+    st.subheader("Recommended Cheapest Flights")
+
+    # Filter dataset using updated column names
+    recs = dataset[
+        (dataset["source_city"] == source_city) &
+        (dataset["destination_city"] == destination_city) &
+        (dataset["class"] == travel_class) &
+        (dataset["stops"] == stops)
+        ]
+
+    if not recs.empty:
+        # Get the cheapest flight per airline (avoid repeating same airline multiple times)
+        recs = recs.sort_values(by="price").groupby("airline").first().reset_index()
+
+        # Sort again by price and pick top 5
+        recs = recs.sort_values(by="price").head(5)
+        st.write("Here are the **top cheapest flights** for your route:")
+
+        # Display without index
+        st.dataframe(
+            recs[[
+                "airline", "source_city", "destination_city", "stops", "class", "price"
+            ]],
+            hide_index=True
+        )
+    else:
+        st.warning("⚠️ No matching flights found in dataset.")
